@@ -2,34 +2,12 @@ var http = require('http');
 var fs = require('fs');
 var url = require('url');
 var qs = require('querystring');
+var path = require('path');//외부정보가 오염되지 않도록 하기 위해 사용한다.
+var sanitize = require('sanitize-html');//sanitize모듈를 사용하기 위해
 
-function templateHTML(title, list, body, control) {
-  return  `<!doctype html>
-  <html>
-  <head>
-    <title>WEB1 - ${title}</title>
-    <meta charset="utf-8">
-  </head>
-  <body>
-    <h1><a href="/">WEB2</a></h1>
-    ${list}
-    ${control}
-    ${body}
-  </body>
-  </html>
-`;
-}
 
-function templateList(filelist) {
-  var list = '<ul>';
-  var i=0;
-  while(i<filelist.length){
-    list = list+`<li><a href="/?id=${filelist[i]}">${filelist[i]}</a></li>`;
-    i++;
-  }
-  list = list+'</ul>';
-  return list;
-}
+//lib폴더 아래에 template.js를 require해와 객체를 사용한다.
+var template = require('./lib/template.js');
 
 
 var app = http.createServer(function(request,response){
@@ -43,31 +21,46 @@ var app = http.createServer(function(request,response){
       fs.readdir('./data', function(error, filelist){
         var title = 'Welcome';
         var description = 'Hello Node.js';
+        /*
         var templatelist = templateList(filelist);
         var template = templateHTML(title, templatelist,
           `<h2>${title}</h2>${description}`,
+          `<a href="/create">create</a>`);*/
+
+          //객체안의 함수를 사용한 코드
+        var templatelist = template.list(filelist);
+        var html = template.html(title, templatelist,
+          `<h2>${title}</h2>${description}`,
           `<a href="/create">create</a>`);
+
         response.writeHead(200);
-        response.end(template);
+        response.end(html);
       })
 
 
 }else {
   fs.readdir('./data', function(error, filelist){
-    fs.readFile(`data/${queryData.id}`, 'utf8', function(err,description){
+    var filterId = path.parse(queryData.id).base;//queryString으로 오는 값을
+    //path.parse로 부모폴더에 있는 파일을 건들지 못하게 만든다.
+    fs.readFile(`data/${filterId}`, 'utf8', function(err,description){
       var title = queryData.id;
-      var templatelist = templateList(filelist);
-      var template = templateHTML(title, templatelist,
-        `<h2>${title}</h2>${description}`,
+      //파일을 읽어오는 부분에서 XCC공격을 막기 위해 sanitize모듈을 사용해 준다.
+      var sanitizedTitle = sanitize(title);
+      var sanitizedDescription = sanitize(description, {
+        allowedTags:['h1']
+      });
+      var templatelist = template.list(filelist);
+      var html = template.html(sanitizedTitle, templatelist,
+        `<h2>${sanitizedTitle}</h2>${sanitizedDescription}`,
         `<a href="/create">create</a>
-         <a href="/update?id=${title}">update</a>
+         <a href="/update?id=${sanitizedTitle}">update</a>
          <form action="process_delete" method="post">
-          <input type="hidden" name="id" value="${title}">
+          <input type="hidden" name="id" value="${sanitizedTitle}">
           <input type="submit" value="delete">
          </form>`
        );
       response.writeHead(200);
-      response.end(template);
+      response.end(html);
     });
   });
   }
@@ -78,10 +71,10 @@ var app = http.createServer(function(request,response){
 //위의 readdir을 복사해서 가져온다.
   fs.readdir('./data', function(error, filelist){
     var title = 'WEB - Create';
-    var templatelist = templateList(filelist);
+    var templatelist = template.list(filelist);
     //templateHTML에서 body부분에 들어 갈 부분을
     //form태그로 만들어서 process_create 서버로 내용을 보내준다.
-    var template = templateHTML(title, templatelist,
+    var html = template.html(title, templatelist,
       `<form action="http://localhost:3000/process_create" method="post">
       <p><input type="text" name="title" placeholder="title"></p>
       <p><textarea name="description" placeholder="description"></textarea></p>
@@ -89,7 +82,7 @@ var app = http.createServer(function(request,response){
       </form>
       `,``);
     response.writeHead(200);
-    response.end(template);
+    response.end(html);
   });
 
 } else if(pathname==='/process_create')
@@ -122,10 +115,11 @@ var app = http.createServer(function(request,response){
 
 } else if(pathname === '/update'){
   fs.readdir('./data', function(error, filelist){
-    fs.readFile(`data/${queryData.id}`, 'utf8', function(err,description){
+    var filterId = path.parse(queryData.id).base;
+    fs.readFile(`data/${filterId}`, 'utf8', function(err,description){
       var title = queryData.id;
-      var templatelist = templateList(filelist);
-      var template = templateHTML(title, templatelist,
+      var templatelist = template.list(filelist);
+      var html = template.html(title, templatelist,
         `<form action="/process_update" method="post">
           <input type="hidden" name="id" value="${title}">
         <p><input type="text" name="title" value="${title}"></p>
@@ -135,7 +129,7 @@ var app = http.createServer(function(request,response){
         `<a href="/create">create</a>
          <a href="/update?id=${title}">update</a>`);
       response.writeHead(200);
-      response.end(template);
+      response.end(html);
     });
   });
 } else if(pathname==='/process_update'){
@@ -174,7 +168,8 @@ var app = http.createServer(function(request,response){
     var post = qs.parse(body);
     var id = post.id;
     //data폴더에 id에 해당하는 파일을 삭제하는 역할을 하는 unlink사용
-    fs.unlink(`data/${id}`, function(err){
+    var filterId = path.parse(id).base;
+    fs.unlink(`data/${filterId}`, function(err){
       response.writeHead(302, {Location: `/`});//삭제하고 홈으로 가게 리다이렉션
       response.end();
     });
